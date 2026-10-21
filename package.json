@@ -1,0 +1,26 @@
+{
+  "name": "program-security-lab-1",
+  "version": "1.0.0",
+  "description": "## Опис проєкту Проєкт системи захищеної автентифікації користувачів (Auth Service), розроблений за принципами Specification-Driven Development (SDD) та стандартами ISO/IEC/IEEE 12207, 29148, 42010.",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs",
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "dotenv": "^18.0.8",
+    "express": "^5.3.0",
+    "express-session": "^1.19.0",
+    "otplib": "^13.5.0",
+    "qrcode": "^1.5.4",
+    "speakeasy": "^2.0.0",
+    "uuid": "^14.0.3"
+  }
+}
