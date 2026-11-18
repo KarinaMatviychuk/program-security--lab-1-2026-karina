@@ -15,6 +15,7 @@
         button:hover { background: #2980b9; }
         .book-card { background: #f8f9fa; border-left: 4px solid #3498db; padding: 15px; margin: 15px 0; border-radius: 6px; }
         .license-box { background: #eef7ff; border: 1px solid #b8daff; padding: 15px; border-radius: 8px; margin-bottom: 20px; }
+        .token-box { background: #f1f8e9; border: 1px solid #c5e1a5; padding: 10px; border-radius: 6px; font-size: 12px; word-break: break-all; margin-bottom: 15px; color: #33691e; }
         .badge { padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; }
         .badge-free { background: #ffeeba; color: #856404; }
         .badge-pro { background: #d4edda; color: #155724; }
@@ -37,7 +38,7 @@
         <input type="email" id="email" placeholder="Email (наприклад: karina@gmail.com)">
         <input type="password" id="password" placeholder="Пароль (мін. 8 символів)">
         <input type="text" id="mfaToken" placeholder="6-значний код МФА (якщо увімкнено)">
-        <button onclick="login()">Увійти</button>
+        <button onclick="login()">Увійти та отримати Bearer Token</button>
         <button onclick="register()" style="background: #2ecc71;">Зареєструватися</button>
     </div>
 
@@ -47,11 +48,16 @@
             <button onclick="logout()" style="width: auto; background: #e74c3c;">Вийти</button>
         </div>
 
+        <div class="token-box">
+            <b>🔑 Активний Bearer Access Token (передається у заголовку Authorization):</b><br>
+            <span id="tokenDisplay"></span>
+        </div>
+
         <div class="license-box">
             <h3 style="margin-top:0;">🔐 Ліцензування Freemium / PRO (Цифровий підпис Ed25519)</h3>
-            <p style="font-size: 14px; margin: 5px 0;">Тариф <b>FREE</b> обмежує трекер до <b>2 книг</b>. Для зняття обмеження згенеруйте та активуйте підписану ключем Ed25519 ліцензію PRO:</p>
+            <p style="font-size: 14px; margin: 5px 0;">Тариф <b>FREE</b> обмежує трекер до <b>2 книг</b>. Активуйте ліцензію PRO:</p>
             <button onclick="generateDemoLicense()" style="background: #8e44ad; width: auto;">1. Отримати підписаний ключ PRO (Ed25519)</button>
-            <input type="text" id="licenseKeyInput" placeholder="Вставте підписаний ліцензійний ключ (payload.signature)">
+            <input type="text" id="licenseKeyInput" placeholder="Вставте підписаний ліцензійний ключ">
             <button onclick="activateLicense()" style="background: #27ae60;">2. Перевірити підпис Ed25519 та активувати PRO</button>
         </div>
 
@@ -67,10 +73,18 @@
 </div>
 
 <script>
+    // Зберігаємо Bearer-токен у пам'яті / sessionStorage клієнта
+    let accessToken = sessionStorage.getItem('bt_access_token') || '';
+
     async function apiRequest(url, method, data) {
+        const headers = { 'Content-Type': 'application/json' };
+        if (accessToken) {
+            headers['Authorization'] = `Bearer ${accessToken}`;
+        }
+
         const res = await fetch(url, {
             method: method,
-            headers: { 'Content-Type': 'application/json' },
+            headers: headers,
             body: data ? JSON.stringify(data) : null
         });
         const result = await res.json();
@@ -102,11 +116,15 @@
         const mfaToken = document.getElementById('mfaToken').value;
 
         const res = await apiRequest('/api/auth/login', 'POST', { email, password, mfaToken });
-        if (res) {
-            showAlert('Успішний вхід!', 'success');
+        if (res && res.access_token) {
+            accessToken = res.access_token;
+            sessionStorage.setItem('bt_access_token', accessToken);
+
+            showAlert('Успішний вхід! Отримано Bearer Token.', 'success');
             document.getElementById('authSection').classList.remove('active');
             document.getElementById('appSection').classList.add('active');
             document.getElementById('userEmail').innerText = res.user.email;
+            document.getElementById('tokenDisplay').innerText = accessToken;
             updatePlanBadge(res.user.plan);
             loadBooks();
         }
@@ -118,8 +136,9 @@
         el.className = 'badge ' + (plan === 'PRO' ? 'badge-pro' : 'badge-free');
     }
 
-    async function logout() {
-        await apiRequest('/api/auth/logout', 'POST');
+    function logout() {
+        accessToken = '';
+        sessionStorage.removeItem('bt_access_token');
         document.getElementById('appSection').classList.remove('active');
         document.getElementById('authSection').classList.add('active');
     }
@@ -128,7 +147,7 @@
         const res = await apiRequest('/api/license/issue-demo', 'POST');
         if (res) {
             document.getElementById('licenseKeyInput').value = res.licenseKey;
-            showAlert('Згенеровано ліцензію PRO з цифровим підписом Ed25519!', 'success');
+            showAlert('Згенеровано ліцензію PRO з підписом Ed25519!', 'success');
         }
     }
 
@@ -169,7 +188,7 @@
                     <div class="progress-bar"><div class="progress-fill" style="width: ${percent}%;"></div></div>
                     ${notesHtml}
                     <input type="number" id="progress-${book.id}" placeholder="Прочитано сторінок">
-                    <input type="text" id="note-${book.id}" placeholder="Нотатка / Цитата (шифрується AES-256-GCM)">
+                    <input type="text" id="note-${book.id}" placeholder="Нотатка / Цитата">
                     <button onclick="updateProgress('${book.id}')">Оновити прогрес</button>
                 </div>
             `;

@@ -1,11 +1,10 @@
 /**
  * BookTrace - Secure Reading Tracker API & Server
- * Лабораторні роботи №3, №4 та №5 з дисципліни "Безпека програм і даних"
- * Виконала: Матвійчук Каріна (ПЗ-23-1), Варіант 8
+ * Лабораторні роботи №3, №4, №5 та №6 з дисципліни "Безпека програм і даних"
+ * Виконала: Матвійчук Каріна (ІПЗ-23-1), Варіант 8
  */
 
 const express = require('express');
-const session = require('express-session');
 const bcrypt = require('bcryptjs');
 const speakeasy = require('speakeasy');
 const crypto = require('crypto');
@@ -16,13 +15,6 @@ const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
-
-app.use(session({
-    secret: 'super-secret-booktrace-key-2026',
-    resave: false,
-    saveUninitialized: false,
-    cookie: { httpOnly: true, maxAge: 3600000 }
-}));
 
 // ======================================================
 // ЛАБ 4: КРИПТОГРАФІЧНИЙ МОДУЛЬ (AES-256-GCM AEAD)
@@ -53,11 +45,9 @@ function decryptNote(encryptedObj) {
 // ======================================================
 // ЛАБ 5: ЦИФРОВИЙ ПІДПИС ED25519 (ЛІЦЕНЗУВАННЯ) ТА HMAC
 // ======================================================
-// Генерація пари асиметричних ключів Ed25519 розробника
 const { publicKey: LICENSE_PUBLIC_KEY, privateKey: LICENSE_PRIVATE_KEY } = crypto.generateKeyPairSync('ed25519');
 const INTEGRITY_HMAC_SECRET = crypto.randomBytes(32);
 
-// Генерація підписаної PRO-ліцензії (виконується на стороні сервера ліцензування)
 function issueProLicense(email) {
     const payload = JSON.stringify({
         product: "BookTrace-PRO",
@@ -71,7 +61,6 @@ function issueProLicense(email) {
     return `${payloadBase64}.${signature}`;
 }
 
-// Перевірка ліцензії відкритим ключем Ed25519 (не дозволяє підробити ліцензію)
 function verifyProLicense(licenseKey, expectedEmail) {
     try {
         const parts = licenseKey.split('.');
@@ -100,10 +89,83 @@ function verifyProLicense(licenseKey, expectedEmail) {
     }
 }
 
-// Обчислення HMAC-SHA256 для контролю цілісності прогресу читання
 function computeProgressHmac(book) {
     const raw = `${book.id}|${book.userId}|${book.totalPages}|${book.readPages}`;
     return crypto.createHmac('sha256', INTEGRITY_HMAC_SECRET).update(raw).digest('hex');
+}
+
+// ======================================================
+// ЛАБ 6: КЛІЄНТ-СЕРВЕРНА МОДЕЛЬ ДОВІРИ ТА BEARER-ТОКЕНИ
+// ======================================================
+const TOKEN_SIGNING_SECRET = crypto.randomBytes(32);
+const TOKEN_TTL_SECONDS = 1800; // 30 хвилин
+
+// Генерація підписаного токена доступу (HMAC-SHA256)
+function generateAccessToken(user) {
+    const now = Math.floor(Date.now() / 1000);
+    const payloadObj = {
+        sub: user.id,
+        email: user.email,
+        role: user.role,
+        iat: now,
+        exp: now + TOKEN_TTL_SECONDS
+    };
+    const encodedPayload = Buffer.from(JSON.stringify(payloadObj), 'utf8').toString('base64url');
+    const signature = crypto
+        .createHmac('sha256', TOKEN_SIGNING_SECRET)
+        .update(encodedPayload)
+        .digest('base64url');
+    return `${encodedPayload}.${signature}`;
+}
+
+// Верифікація Bearer-токена на стороні сервера
+function verifyAccessToken(token) {
+    try {
+        const parts = token.split('.');
+        if (parts.length !== 2) return null;
+
+        const [encodedPayload, signature] = parts;
+        const expectedSig = crypto
+            .createHmac('sha256', TOKEN_SIGNING_SECRET)
+            .update(encodedPayload)
+            .digest('base64url');
+
+        if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expectedSig))) {
+            return null;
+        }
+
+        const payload = JSON.parse(Buffer.from(encodedPayload, 'base64url').toString('utf8'));
+        const now = Math.floor(Date.now() / 1000);
+        if (payload.exp <= now) {
+            return null; // Строк дії токена вичерпано
+        }
+        return payload;
+    } catch (err) {
+        return null;
+    }
+}
+
+// Middleware перевірки заголовка Authorization: Bearer <token>
+function authenticateBearer(req, res, next) {
+    const authHeader = req.headers['authorization'] || '';
+    if (!authHeader.startsWith('Bearer ')) {
+        return res.status(401).json({ error: 'Відсутній заголовок Authorization: Bearer <token>' });
+    }
+
+    const token = authHeader.slice(7).trim();
+    const payload = verifyAccessToken(token);
+    if (!payload) {
+        return res.status(401).json({ error: 'Недійсний або прострочений токен доступу' });
+    }
+
+    // Встановлюємо довірений контекст користувача на сервері
+    req.auth = {
+        userId: payload.sub,
+        email: payload.email,
+        role: payload.role,
+        exp: payload.exp
+    };
+    next();
 }
 
 // "База даних" у пам'яті
@@ -113,15 +175,18 @@ const db = {
     loginAttempts: {}
 };
 
-function requireAuth(req, res, next) {
-    if (!req.session.userId) {
-        return res.status(401).json({ error: 'Помилка доступу: увійдіть у систему' });
-    }
-    next();
-}
-
 // ================= API ЕНДПОІНТИ =================
 
+// Публічний маршрут: інформація про API
+app.get('/api/status', (req, res) => {
+    res.json({
+        service: 'BookTrace Secure API',
+        authScheme: 'Bearer Token (HMAC-SHA256)',
+        trustBoundary: 'Server-side Authorization & Ownership Check'
+    });
+});
+
+// 1. Реєстрація
 app.post('/api/auth/register', async (req, res) => {
     try {
         const { email, password, role } = req.body;
@@ -141,7 +206,7 @@ app.post('/api/auth/register', async (req, res) => {
             email,
             passwordHash: hashedPassword,
             role: role === 'ADMIN' ? 'ADMIN' : 'READER',
-            plan: 'FREE', // За замовчуванням Freemium тариф (до 2 книг)
+            plan: 'FREE',
             mfaEnabled: false,
             mfaSecret: mfaSecret.base32
         };
@@ -153,6 +218,7 @@ app.post('/api/auth/register', async (req, res) => {
     }
 });
 
+// 2. Вхід та видача Bearer-токена
 app.post('/api/auth/login', async (req, res) => {
     const { email, password, mfaToken } = req.body;
     const attempts = db.loginAttempts[email] || 0;
@@ -174,63 +240,65 @@ app.post('/api/auth/login', async (req, res) => {
     }
 
     db.loginAttempts[email] = 0;
-    req.session.userId = user.id;
-    req.session.email = user.email;
-    req.session.role = user.role;
+    const accessToken = generateAccessToken(user);
 
     res.json({
         message: 'Успішний вхід!',
+        access_token: accessToken,
+        token_type: 'Bearer',
+        expires_in: TOKEN_TTL_SECONDS,
         user: { id: user.id, email: user.email, role: user.role, plan: user.plan }
     });
 });
 
-app.post('/api/auth/logout', requireAuth, (req, res) => {
-    req.session.destroy(() => {
-        res.clearCookie('connect.sid');
-        res.json({ message: 'Сеанс завершено' });
+// 3. Перевірка поточного автентифікованого суб'єкта (/api/whoami)
+app.get('/api/whoami', authenticateBearer, (req, res) => {
+    const user = db.users.find(u => u.id === req.auth.userId);
+    if (!user) return res.status(404).json({ error: 'Користувача не знайдено' });
+    res.json({
+        userId: user.id,
+        email: user.email,
+        role: user.role,
+        plan: user.plan,
+        tokenExpiresAt: new Date(req.auth.exp * 1000).toISOString()
     });
 });
 
-// Випуск демонстраційної підписаної ліцензії Ed25519 для поточного користувача
-app.post('/api/license/issue-demo', requireAuth, (req, res) => {
-    const licenseKey = issueProLicense(req.session.email);
-    console.log("🔑 [Ed25519] Згенеровано підписану ліцензію PRO:", licenseKey);
+// 4. Випуск демонстраційної підписаної ліцензії Ed25519
+app.post('/api/license/issue-demo', authenticateBearer, (req, res) => {
+    const licenseKey = issueProLicense(req.auth.email);
     res.json({ licenseKey });
 });
 
-// Активація ліцензії PRO з перевіркою цифрового підпису Ed25519
-app.post('/api/license/activate', requireAuth, (req, res) => {
+// 5. Активація ліцензії PRO з перевіркою підпису Ed25519 на сервері
+app.post('/api/license/activate', authenticateBearer, (req, res) => {
     const { licenseKey } = req.body;
-    const check = verifyProLicense(licenseKey, req.session.email);
+    const check = verifyProLicense(licenseKey, req.auth.email);
 
     if (!check.valid) {
-        console.warn("⛔ [Ed25519] Відхилено невалідну ліцензію:", check.reason);
         return res.status(403).json({ error: check.reason });
     }
 
-    const user = db.users.find(u => u.id === req.session.userId);
+    const user = db.users.find(u => u.id === req.auth.userId);
     user.plan = 'PRO';
-    console.log("✅ [Ed25519] Активовано підписку PRO для:", user.email);
     res.json({ message: 'Ліцензію PRO підтверджено підписом Ed25519 та активовано!', plan: 'PRO' });
 });
 
-// Отримання списку книг з перевіркою цілісності HMAC
-app.get('/api/books', requireAuth, (req, res) => {
-    const user = db.users.find(u => u.id === req.session.userId);
+// 6. Отримання списку книг (тільки для власника req.auth.userId)
+app.get('/api/books', authenticateBearer, (req, res) => {
+    const user = db.users.find(u => u.id === req.auth.userId);
+    if (!user) return res.status(404).json({ error: 'Користувача не знайдено' });
+
     const userBooks = db.books
-        .filter(b => b.userId === req.session.userId)
-        .map(b => {
-            const expectedHmac = computeProgressHmac(b);
-            const integrityOk = (b.hmac === expectedHmac);
-            return {
-                ...b,
-                integrityOk,
-                notes: b.notes.map(n => ({
-                    text: decryptNote(n.encryptedData),
-                    date: n.date
-                }))
-            };
-        });
+        .filter(b => b.userId === req.auth.userId)
+        .map(b => ({
+            ...b,
+            integrityOk: b.hmac === computeProgressHmac(b),
+            notes: b.notes.map(n => ({
+                text: decryptNote(n.encryptedData),
+                date: n.date
+            }))
+        }));
 
     res.json({
         books: userBooks,
@@ -238,15 +306,14 @@ app.get('/api/books', requireAuth, (req, res) => {
     });
 });
 
-// Додавання книги (з контролем Freemium-обмеження)
-app.post('/api/books', requireAuth, (req, res) => {
-    const user = db.users.find(u => u.id === req.session.userId);
-    const userBooksCount = db.books.filter(b => b.userId === req.session.userId).length;
+// 7. Додавання книги (серверна авторизація Freemium-обмеження)
+app.post('/api/books', authenticateBearer, (req, res) => {
+    const user = db.users.find(u => u.id === req.auth.userId);
+    const userBooksCount = db.books.filter(b => b.userId === req.auth.userId).length;
 
-    // Перевірка ліцензійного обмеження Freemium (макс. 2 книги на FREE)
     if (user.plan === 'FREE' && userBooksCount >= 2) {
         return res.status(403).json({
-            error: 'Ліміт тарифу FREE (макс. 2 книги)! Активуйте PRO-ліцензію з підписом Ed25519.'
+            error: 'Ліміт тарифу FREE (макс. 2 книги)! Активуйте PRO-ліцензію.'
         });
     }
 
@@ -258,7 +325,7 @@ app.post('/api/books', requireAuth, (req, res) => {
 
     const newBook = {
         id: crypto.randomUUID(),
-        userId: req.session.userId,
+        userId: req.auth.userId,
         title,
         author,
         totalPages: pages,
@@ -271,22 +338,22 @@ app.post('/api/books', requireAuth, (req, res) => {
     res.status(201).json({ message: 'Книгу додано!', book: newBook });
 });
 
-// Оновлення прогресу з контролем інваріантів цілісності та перерахунком HMAC
-app.put('/api/books/:id/progress', requireAuth, (req, res) => {
+// 8. Оновлення прогресу (серверна перевірка власності та інваріантів)
+app.put('/api/books/:id/progress', authenticateBearer, (req, res) => {
     const book = db.books.find(b => b.id === req.params.id);
     if (!book) return res.status(404).json({ error: 'Книгу не знайдено' });
-    if (book.userId !== req.session.userId) return res.status(403).json({ error: 'Це не ваша книга' });
+    if (book.userId !== req.auth.userId) return res.status(403).json({ error: 'Доступ заборонено: ви не власник книги' });
 
     const { readPages, note } = req.body;
     if (readPages !== undefined && readPages !== '') {
         const parsedPages = parseInt(readPages);
         if (isNaN(parsedPages) || parsedPages < 0 || parsedPages > book.totalPages) {
             return res.status(400).json({
-                error: `Порушення цілісності даних: кількість прочитаних сторінок має бути від 0 до ${book.totalPages}`
+                error: `Порушення цілісності даних: сторінки мають бути від 0 до ${book.totalPages}`
             });
         }
         book.readPages = parsedPages;
-        book.hmac = computeProgressHmac(book); // Оновлення HMAC після валідної зміни
+        book.hmac = computeProgressHmac(book);
     }
 
     if (note && note.trim() !== "") {
@@ -303,7 +370,7 @@ app.put('/api/books/:id/progress', requireAuth, (req, res) => {
 const PORT = 3000;
 app.listen(PORT, () => {
     console.log(`================================================`);
-    console.log(`🚀 Сервер BookTrace (Lab 5: Ed25519 + HMAC + GCM) запущено!`);
+    console.log(`🚀 Сервер BookTrace (Lab 6: Bearer Auth + Trust Model) запущено!`);
     console.log(`👉 Відкрийте в браузері: http://localhost:${PORT}`);
     console.log(`================================================`);
 });
