@@ -1,0 +1,44 @@
+{
+  "backupId": "backup_1795116571271",
+  "createdAt": "2026-11-19T19:29:31.272Z",
+  "data": {
+    "users": [
+      {
+        "id": "94cb51d1-07a1-4755-a1d7-fa39b76c9c17",
+        "email": "karina@gmail.com",
+        "passwordHash": "$2b$12$4e8oZjHBDeRy.1fzJxzZSe3v421OUSyc0XIPk.Gz5Wh/EOFihG8c2",
+        "role": "READER",
+        "plan": "FREE",
+        "mfaEnabled": false,
+        "mfaSecret": "KRESQYKXFY2EW4SDNFRDS4BDKBAE6VJ6"
+      }
+    ],
+    "books": [
+      {
+        "id": "aa785d4f-e776-4666-9b61-5a328756188d",
+        "userId": "94cb51d1-07a1-4755-a1d7-fa39b76c9c17",
+        "title": "Гаррі Поттер та філософський камінь",
+        "author": "Джона Роулінг",
+        "totalPages": 500,
+        "readPages": 10,
+        "notes": [
+          {
+            "encryptedData": {
+              "ciphertext": "19d4b0304a91cc60db7bf8ad23c86dd6c6bc74df",
+              "iv": "d9780055cb2d0864c81ffafd",
+              "authTag": "f4b616e4b7476cc4a8317fb221f80157"
+            },
+            "date": "11/19/2026, 9:29:20 PM"
+          }
+        ],
+        "hmac": "9da2c0aa876fb1938031d21ca5606a19d928ef20862f74ebd173c01acbf3b3aa"
+      }
+    ]
+  },
+  "cryptoKeys": {
+    "dbEncryptionKeyHex": "5b65fed35c05d3cffb78519c1c2b918b3668e07efad8f04dbb919f6e6c716519",
+    "hmacSecretHex": "375168726b56747203929effb674288f46162ef417add230bf7cbf5604e8758b",
+    "licensePublicPem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAZ3TGXieubLevNfs2MaeXJ0tXW8g3O2FBlZmbmGnmJZ4=\n-----END PUBLIC KEY-----\n",
+    "licensePrivatePem": "-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIL+cAwpldQLtpZBF2rsXiQjsbTb95Gq9yO55i6Egm05n\n-----END PRIVATE KEY-----\n"
+  }
+}
